@@ -39,7 +39,7 @@ const Search = ({ navigation }: any) => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [scrollY, setScrollY] = useState(0);
+  const scrollYRef = useRef(0); // Use ref instead of state to avoid re-renders
 
   // Cleanup on unmount
   useEffect(() => {
@@ -251,15 +251,15 @@ const Search = ({ navigation }: any) => {
             const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
             const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
 
-            // Update scroll position for video autoplay
-            setScrollY(contentOffset.y);
+            // Update scroll position ref (no re-render)
+            scrollYRef.current = contentOffset.y;
 
             if (isCloseToBottom && hasMore && !loadingMore && !loading) {
               console.log('Loading more posts... Page:', page + 1);
               fetchPosts(page + 1);
             }
           }}
-          scrollEventThrottle={200}
+          scrollEventThrottle={100}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -308,7 +308,7 @@ const Search = ({ navigation }: any) => {
                   navigation={navigation}
                   ProfilepicData={posts}
                   allPostsData={allPostsData}
-                  scrollY={scrollY}
+                  scrollYRef={scrollYRef}
                 />
                 {loadingMore && (
                   <ActivityIndicator

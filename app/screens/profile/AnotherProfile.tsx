@@ -136,9 +136,20 @@ const AnotherProfile = () => {
         .map((feed) => ({
           id: feed.feedId,
           imageUrl: feed.contentUrl,
-          likeCount: feed.likeCount || 0,
+          likeCount: feed.likeCount || feed.likesCount || 0,
+          commentsCount: feed.commentsCount || 0,
+          isLiked: feed.isLiked || false,
+          isSaved: feed.isSaved || false,
+          isDisliked: feed.isDisliked || false,
+          dislikesCount: feed.dislikesCount || 0,
+          caption: feed.caption || '',
+          tags: feed.tags || [],
+          background: feed.background || '#fff',
+          timeAgo: feed.timeAgo || 'Recently',
           // Store theme colors for instant loading
           themeColor: feed.themeColor || null,
+          createdByAccount: profileUserId,
+          roleRef: roleRef || 'User',
         }));
 
       const videoReels = feeds
@@ -754,7 +765,12 @@ const AnotherProfile = () => {
                       <View key={item.id} style={{ width: "33.33%" }}>
                         <TouchableOpacity
                           style={{ padding: 2 }}
-                          onPress={() =>
+                          onPress={() => {
+                            // DEBUG LOG: Check what data is being passed
+                            console.log('📊 AnotherProfile -> ProfilePost navigation data:', {
+                              post: { id: item.id, isLiked: item.isLiked, isSaved: item.isSaved, isDisliked: item.isDisliked },
+                              allPosts: posts.slice(0, 2).map(p => ({ id: p.id, isLiked: p.isLiked, isSaved: p.isSaved, isDisliked: p.isDisliked }))
+                            });
                             navigation.navigate("ProfilePost", {
                               initialPostId: item.id,
                               profileUserId: profileUserId,
@@ -764,18 +780,25 @@ const AnotherProfile = () => {
                                 feedId: p.id,
                                 contentUrl: p.imageUrl,
                                 likesCount: p.likeCount || 0,
+                                commentsCount: p.commentsCount || 0,
                                 type: 'image',
                                 userName: profile?.userName || 'Unknown',
                                 profileAvatar: profile?.profileAvatar,
-                                timeAgo: 'Recently',
-                                commentsCount: 0,
-                                isLiked: false,
-                                isSaved: false,
+                                timeAgo: p.timeAgo || 'Recently',
+                                caption: p.caption || '',
+                                tags: p.tags || [],
+                                background: p.background || '#fff',
+                                isLiked: p.isLiked || false,
+                                isSaved: p.isSaved || false,
+                                isDisliked: p.isDisliked || false,
+                                dislikesCount: p.dislikesCount || 0,
+                                createdByAccount: profileUserId,
+                                roleRef: roleRef || 'User',
                                 // Include theme colors for instant loading
                                 themeColor: p.themeColor || null,
                               }))
-                            })
-                          }
+                            });
+                          }}
                         >
                           <Image
                             style={{
@@ -851,12 +874,18 @@ const AnotherProfile = () => {
                         style={{ width: "33.33%", padding: 2 }}
                       >
                         <TouchableOpacity
-                          onPress={() =>
+                          onPress={() => {
+                            // Rebuild reels data with CURRENT profile to fix "Unknown" issue
+                            const reelsWithProfile = reels.map(reel => ({
+                              ...reel,
+                              userName: profile?.userName || profile?.displayName || 'User',
+                              profileAvatar: profile?.profileAvatar,
+                            }));
                             navigation.navigate("Reels", {
                               initialVideoId: item.feedId || item._id,
-                              allReelsData: reels, // Pass all user's reels
-                            })
-                          }
+                              allReelsData: reelsWithProfile,
+                            });
+                          }}
                         >
                           <Image
                             style={{

@@ -203,13 +203,18 @@ const StoryList = forwardRef<StoryListHandle>((_, ref) => {
     try {
       setLoading(true);
       const response = await api.get('/api/get/trending/feed');
-      console.log('Trending feeds response:', response.data.data);
 
       if (response.data?.data && Array.isArray(response.data.data)) {
         setTrendingFeeds(response.data.data);
+      } else {
+        // API returned but no data - just show empty state
+        setTrendingFeeds([]);
       }
-    } catch (error) {
-      console.error('Error fetching trending feeds:', error);
+    } catch (error: any) {
+      // Silently handle errors - just show empty state with "Add Story" 
+      // This prevents 404 errors from breaking the app
+      console.log('Trending feeds not available:', error?.response?.status || error?.message);
+      setTrendingFeeds([]);
     } finally {
       setLoading(false);
     }

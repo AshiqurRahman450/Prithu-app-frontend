@@ -199,7 +199,7 @@ const SkeletonPostCard = () => {
 
 const PostList = forwardRef<PostListHandle, PostListProps>(
   ({ scrollRef, categoryId, sheetRef, optionSheet, onRefresh, refreshing = false }, ref) => {
-    const [visibleBoxes, setVisibleBoxes] = useState<string[]>([]);
+    // REMOVED: visibleBoxes state - now using ref for zero re-renders
     const [posts, setPosts] = useState<Post[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshingTop, setRefreshingTop] = useState(false);
@@ -215,6 +215,8 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
     const abortControllerRef = useRef<AbortController | null>(null);
     const latestRequestIdRef = useRef<number>(0);
     const ongoingRequestsRef = useRef<Set<string>>(new Set()); // Track ongoing requests
+    const visiblePostsRef = useRef<string[]>([]); // Use ref instead of state for visible posts
+    const viewCountDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
     const [userProfile, setUserProfile] = useState<any>(null);
     const [visibilitySettings, setVisibilitySettings] = useState<any>(null);
@@ -500,10 +502,12 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
 
     // --------------------------- Scroll Handlers ----------------------------
 
-    const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // OPTIMIZED: Use useCallback and avoid state updates during scroll
+    const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
       const scrollY = contentOffset.y;
 
+      // Calculate visible posts using ref (NO STATE UPDATE)
       const visible = posts
         .map((p) => {
           const ref = boxRefs.current[p._id];
@@ -514,7 +518,19 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
             : null;
         })
         .filter((id): id is string => !!id);
-      setVisibleBoxes(visible);
+
+      // Store in ref instead of state - no re-renders!
+      visiblePostsRef.current = visible;
+
+      // Debounced view count recording (only record after scroll settles)
+      if (viewCountDebounceRef.current) {
+        clearTimeout(viewCountDebounceRef.current);
+      }
+      viewCountDebounceRef.current = setTimeout(() => {
+        if (visiblePostsRef.current.length > 0) {
+          recordViewCount(visiblePostsRef.current[0]);
+        }
+      }, 300); // Wait 300ms after scroll stops
 
       // Pagination Logic - improved to prevent multiple triggers
       const isCloseToBottom = layoutMeasurement.height + scrollY >= contentSize.height - windowHeight * 1.5;
@@ -525,7 +541,7 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
         console.log("📄 Fetching more posts... Page:", page + 1);
         fetchPosts(categoryId ?? null, page + 1);
       }
-    };
+    }, [posts, categoryId, page, hasMore, isFetchingMore, loading, fetchPosts, recordViewCount]);
 
     const handlePull = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const y = e.nativeEvent.contentOffset.y;
@@ -534,10 +550,11 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
       if (y >= 0 && refreshingTop) setRefreshingTop(false);
     };
 
-    const handleBoxLayout = (id: string) => (event: any) => {
+    // Memoized layout handler to prevent re-renders - uses useCallback instead of inline function
+    const handleBoxLayout = useCallback((id: string) => (event: any) => {
       const { y, height } = event.nativeEvent.layout;
       boxRefs.current[id] = { y, height };
-    };
+    }, []);
 
 
 
@@ -580,18 +597,7 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
       initSocket();
     }, []);
 
-
-    useEffect(() => {
-      if (visibleBoxes.length === 0) return;
-
-      const firstVisible = visibleBoxes[0];
-
-      // ✅ Console to verify view trigger
-      console.log("👀 First visible post changed:", firstVisible);
-
-      recordViewCount(firstVisible);
-    }, [visibleBoxes, recordViewCount]);
-
+    // REMOVED: Old visibleBoxes useEffect - view count is now debounced in scroll handler
 
     // Cleanup on unmount
     useEffect(() => {
@@ -627,7 +633,7 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
 
     // --------------------------- UI ----------------------------
 
-    const memoVisibleBoxes = useMemo(() => visibleBoxes, [visibleBoxes]);
+    // REMOVED: memoVisibleBoxes - no longer needed with ref-based tracking
 
     // Memoized callbacks to prevent re-renders - MUST be before any early returns
     const handleNotInterested = useCallback((postId: string) => {
@@ -722,7 +728,6 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
             reelsvideo={null}
             caption={post.caption}
             background={post.background}
-            visibleBoxes={memoVisibleBoxes}
             onNotInterested={() => handleNotInterested(post._id)}
             onHidePost={() => handleHidePost(post._id)}
             profileUserId={post.profileUserId}
@@ -730,7 +735,7 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
             isLiked={post.isLiked}
             isSaved={post.isSaved}
             isDisliked={post.isDisliked || false}
-            dislikesCount={post.dislikesCount || 0}
+            dislikeCount={post.dislikesCount || 0}
             currentUserProfile={userProfile}
             visibilitySettings={visibilitySettings}
             onDislikeUpdate={(newIsDisliked: boolean, newDislikeCount: number) =>
@@ -742,7 +747,7 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
           />
         </View>
       );
-    }, [memoVisibleBoxes, sheetRef, optionSheet, userProfile, visibilitySettings, handleNotInterested, handleHidePost, handleDislikeUpdate, handleLikeUpdate, handleBoxLayout]);
+    }, [sheetRef, optionSheet, userProfile, visibilitySettings, handleNotInterested, handleHidePost, handleDislikeUpdate, handleLikeUpdate, handleBoxLayout]);
 
     // Footer component for loading indicator
     const ListFooterComponent = useCallback(() => {
@@ -808,20 +813,21 @@ const PostList = forwardRef<PostListHandle, PostListProps>(
         }
         // Performance optimizations for Instagram-like smooth scrolling
         removeClippedSubviews={true}
-        maxToRenderPerBatch={3}
-        updateCellsBatchingPeriod={50}
-        windowSize={5}
+        maxToRenderPerBatch={4}
+        updateCellsBatchingPeriod={100}
+        windowSize={7}
         initialNumToRender={3}
-        // Scroll performance
-        scrollEventThrottle={16}
+        // Scroll performance - higher throttle to reduce state updates
+        scrollEventThrottle={32}
         onScroll={handleScroll}
         onScrollBeginDrag={handlePull}
         // Disable bounce for smoother feel
         showsVerticalScrollIndicator={false}
         // Footer for loading more
         ListFooterComponent={ListFooterComponent}
-        // Extra optimizations
-        legacyImplementation={false}
+        // Extra optimizations for smooth scrolling
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        disableVirtualization={false}
       />
     );
   }

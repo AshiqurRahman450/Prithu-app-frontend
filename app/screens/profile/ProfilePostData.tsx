@@ -1,56 +1,61 @@
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, memo } from 'react';
 import { View, Text, TouchableOpacity, Image, Dimensions } from 'react-native';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { IMAGES, FONTS, COLORS } from '../../constants/theme';
 import PostoptionSheet from '../../components/bottomsheet/PostoptionSheet';
+import { Image as ExpoImage } from 'expo-image';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// Individual Reel Item Component with autoplay (SQUARE FORMAT)
-const ReelItem = ({ data, index, onPress, onOpenSheet, scrollY }: any) => {
+// Individual Reel Item Component with autoplay (SQUARE FORMAT) - Memoized for performance
+const ReelItem = memo(({ data, index, onPress, onOpenSheet, scrollYRef }: any) => {
     const videoRef = useRef<Video>(null);
     const [isPlaying, setIsPlaying] = useState(false);
-    const [itemY, setItemY] = useState(0);
-    const [itemHeight, setItemHeight] = useState(0);
+    const itemLayoutRef = useRef({ y: 0, height: 0 });
+    const wasVisibleRef = useRef(false);
 
     // Handle video status updates
     const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
         if (status.isLoaded) {
             setIsPlaying(status.isPlaying);
-
-            // Loop the video when it ends
-            if (status.didJustFinish) {
-                videoRef.current?.replayAsync();
-            }
         }
     };
 
     // Handle layout to get position
     const handleLayout = (event: any) => {
         const { y, height } = event.nativeEvent.layout;
-        setItemY(y);
-        setItemHeight(height);
+        itemLayoutRef.current = { y, height };
     };
 
-    // Check if item is visible and play/pause accordingly (optimized)
+    // Check visibility using interval (more efficient than useEffect on every scroll)
     useEffect(() => {
-        if (scrollY === undefined || itemY === 0) return;
+        const checkVisibility = () => {
+            if (!scrollYRef?.current && scrollYRef?.current !== 0) return;
 
-        const screenHeight = Dimensions.get('window').height;
-        const isVisible = itemY < scrollY + screenHeight && itemY + itemHeight > scrollY;
+            const scrollY = scrollYRef.current;
+            const { y: itemY, height: itemHeight } = itemLayoutRef.current;
+            if (itemY === 0 && itemHeight === 0) return;
 
-        // Only update if visibility state actually changed
-        if (isVisible && !isPlaying) {
-            videoRef.current?.playAsync().catch(() => {
-                // Silently handle play errors
-            });
-        } else if (!isVisible && isPlaying) {
-            videoRef.current?.pauseAsync().catch(() => {
-                // Silently handle pause errors
-            });
-        }
-    }, [scrollY, itemY, itemHeight]);
+            const isVisible = itemY < scrollY + screenHeight && itemY + itemHeight > scrollY;
+
+            // Only update if visibility state actually changed
+            if (isVisible !== wasVisibleRef.current) {
+                wasVisibleRef.current = isVisible;
+                if (isVisible) {
+                    videoRef.current?.playAsync().catch(() => { });
+                } else {
+                    videoRef.current?.pauseAsync().catch(() => { });
+                }
+            }
+        };
+
+        // Check visibility periodically (every 300ms)
+        const interval = setInterval(checkVisibility, 300);
+        checkVisibility(); // Initial check
+
+        return () => clearInterval(interval);
+    }, [scrollYRef]);
 
     // Pause video on unmount
     useEffect(() => {
@@ -147,10 +152,10 @@ const ReelItem = ({ data, index, onPress, onOpenSheet, scrollY }: any) => {
             </TouchableOpacity>
         </View>
     );
-};
+});
 
-// Main Component
-const ProfilePostData = ({ ProfilepicData, allPostsData, navigation, onNotInterested, setSelectedPostId, scrollY }: any) => {
+// Main Component - use memo for parent too
+const ProfilePostData = memo(({ ProfilepicData, allPostsData, navigation, onNotInterested, setSelectedPostId, scrollYRef }: any) => {
     const optionSheetRef = useRef<any>(null);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
 
@@ -189,10 +194,10 @@ const ProfilePostData = ({ ProfilepicData, allPostsData, navigation, onNotIntere
                     // Render vertical reel with autoplay
                     return (
                         <ReelItem
-                            key={index}
+                            key={data.id || index}
                             data={data}
                             index={index}
-                            scrollY={scrollY}
+                            scrollYRef={scrollYRef}
                             onPress={() => {
                                 // Filter only video feeds for the Reels screen
                                 const allVideoFeeds = allPostsData?.filter((item: any) => item.type === 'video') || [];
@@ -206,10 +211,10 @@ const ProfilePostData = ({ ProfilepicData, allPostsData, navigation, onNotIntere
                     );
                 }
 
-                // Render image post (square format)
+                // Render image post (square format) - use ExpoImage for better performance
                 return (
                     <View
-                        key={index}
+                        key={data.id || index}
                         style={{ width: '33.33%' }}
                     >
                         <TouchableOpacity
@@ -221,9 +226,11 @@ const ProfilePostData = ({ ProfilepicData, allPostsData, navigation, onNotIntere
                                 });
                             }}
                         >
-                            <Image
-                                style={{ width: '100%', height: null, aspectRatio: 1 / 1, borderRadius: 4 }}
+                            <ExpoImage
+                                style={{ width: '100%', height: undefined, aspectRatio: 1, borderRadius: 4 }}
                                 source={data.image}
+                                cachePolicy="disk"
+                                transition={0}
                             />
 
                             {/* Like Count */}
@@ -281,6 +288,6 @@ const ProfilePostData = ({ ProfilepicData, allPostsData, navigation, onNotIntere
             )}
         </View>
     );
-};
+});
 
 export default ProfilePostData;

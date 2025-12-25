@@ -84,18 +84,8 @@ const JobCard: React.FC<JobCardProps> = ({ job, onApply }) => {
     const navigation = useNavigation<any>();
 
     const handleApply = () => {
-        if (onApply) {
-            onApply(job);
-        } else if (job.hiringInfo?.whatsAppNumber) {
-            // Open WhatsApp with pre-filled message
-            const message = encodeURIComponent(
-                `Hi, I'm interested in the ${job.jobTitle} position at ${job.companyName || 'your company'}.`
-            );
-            Linking.openURL(`whatsapp://send?phone=${job.hiringInfo.whatsAppNumber}&text=${message}`);
-        } else if (job.hiringInfo?.email) {
-            // Open email
-            Linking.openURL(`mailto:${job.hiringInfo.email}?subject=Application for ${job.jobTitle}`);
-        }
+        // Always open the jobs website
+        Linking.openURL('https://prithu.app/jobs');
     };
 
     const employmentBadge = job.employmentType ? getBadgeStyle(job.employmentType) : null;

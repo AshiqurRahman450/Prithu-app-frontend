@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react';
 import { View, Text, Image, TouchableOpacity, Alert, ActivityIndicator, Linking, Animated, Share, InteractionManager, Modal, StyleSheet } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { COLORS, FONTS, IMAGES, SIZES } from '../constants/theme';
 import Swiper from 'react-native-swiper';
 import { useNavigation } from '@react-navigation/native';
@@ -160,6 +161,31 @@ const PostCard = ({
   const [likeCount, setLikeCount] = useState(like || 0);
   const [commentCount, setCommentCount] = useState(commentsCount || 0);
 
+  // Sync state with props when they change (fixes navigation from AnotherProfile)
+  useEffect(() => {
+    setIsLiked(initialIsLiked || false);
+  }, [initialIsLiked]);
+
+  useEffect(() => {
+    setIsSaved(initialIsSaved || false);
+  }, [initialIsSaved]);
+
+  useEffect(() => {
+    setIsDisliked(initialIsDisliked || false);
+  }, [initialIsDisliked]);
+
+  useEffect(() => {
+    setDislikesCount(initialDislikeCount || 0);
+  }, [initialDislikeCount]);
+
+  useEffect(() => {
+    setLikeCount(like || 0);
+  }, [like]);
+
+  useEffect(() => {
+    setCommentCount(commentsCount || 0);
+  }, [commentsCount]);
+
 
   // Removed isImageLoading state - progressiveRenderingEnabled handles this natively
   const theme = useTheme();
@@ -246,37 +272,28 @@ const PostCard = ({
     if (postimage?.length > 0 && !hasCalculatedPosition.current) {
       hasCalculatedPosition.current = true;
 
-      // Calculate position in background without blocking render
-      Image.getSize(
-        postimage[0].image,
-        (width, height) => {
-          const calculatedPosition = calculateAvatarPosition(width, height);
-          setAvatarPosition(calculatedPosition);
-          setImageDimensions({ width, height });
-          setIsVerticalImage(height > width);
-        },
-        (error) => {
-          console.log('Image size fetch error:', error);
-          // Keep default bottom-left on error
-        }
-      );
+      // CRITICAL: Defer Image.getSize to after interactions complete to prevent scroll jank
+      const task = InteractionManager.runAfterInteractions(() => {
+        Image.getSize(
+          postimage[0].image,
+          (width, height) => {
+            const calculatedPosition = calculateAvatarPosition(width, height);
+            setAvatarPosition(calculatedPosition);
+            setImageDimensions({ width, height });
+            setIsVerticalImage(height > width);
+          },
+          (error) => {
+            // Keep default bottom-left on error - silent fail
+          }
+        );
+      });
+
+      return () => task.cancel();
     }
   }, [postimage]);
 
-  // Prefetch images for faster loading
-  useEffect(() => {
-    if (postimage?.length > 0) {
-      postimage.forEach((img: any) => {
-        if (img.image) {
-          Image.prefetch(img.image).catch(err => console.log('Prefetch error:', err));
-        }
-      });
-    }
-    // Also prefetch avatar
-    if (avatarToUse) {
-      Image.prefetch(avatarToUse).catch(err => console.log('Avatar prefetch error:', err));
-    }
-  }, [postimage, avatarToUse]);
+  // REMOVED: Prefetch was causing scroll lag by making network requests during scroll
+  // Images are cached automatically when rendered with cache: 'force-cache'
 
   // Custom Popup Component
   const Popup = () => (
@@ -1091,126 +1108,221 @@ const PostCard = ({
             {/* Background is now just the solid themeColor - no conditional rendering */}
 
 
-            <Swiper
-              height={'auto'}
-              showsButtons={false}
-              loop={false}
-              paginationStyle={{ bottom: 10 }}
-              dotStyle={{ width: 5, height: 5, backgroundColor: 'rgba(255, 255, 255, 0.40)' }}
-              activeDotStyle={{ width: 6, height: 6, backgroundColor: '#fff' }}
-              removeClippedSubviews={true}
-            >
-              {postimage.map((data: any, index: any) => (
-                <TouchableOpacity
-                  key={index}
-                  style={{ width: '100%', height: '100%', position: 'relative' }}
-                  activeOpacity={1}
-                  onPress={handleImageTap}
-                >
-                  <Image
-                    style={{ width: '100%', height: '100%' }}
-                    source={{
-                      uri: data.image,
-                      cache: 'force-cache',
+            {/* OPTIMIZED: Skip Swiper for single images to reduce overhead */}
+            {postimage.length === 1 ? (
+              <TouchableOpacity
+                style={{ width: '100%', height: '100%', position: 'relative' }}
+                activeOpacity={1}
+                onPress={handleImageTap}
+              >
+                <ExpoImage
+                  style={{ width: '100%', height: '100%' }}
+                  source={{ uri: postimage[0].image }}
+                  contentFit="contain"
+                  cachePolicy="disk"
+                  recyclingKey={id}
+                  transition={0}
+                  priority="high"
+                />
+
+                {/* Double-tap Like Heart Animation */}
+                {showHeart && (
+                  <Animated.View
+                    style={{
+                      position: 'absolute',
+                      alignSelf: 'center',
+                      top: '40%',
+                      transform: [{ scale: heartScale }],
+                      opacity: heartOpacity,
                     }}
-                    resizeMode="contain"
-                    fadeDuration={0}
-                    progressiveRenderingEnabled={true}
-                  />
-
-                  {/* Double-tap Like Heart Animation */}
-                  {showHeart && (
-                    <Animated.View
+                  >
+                    <Image
+                      source={IMAGES.love}
                       style={{
-                        position: 'absolute',
-                        alignSelf: 'center',
-                        top: '40%',
-                        transform: [{ scale: heartScale }],
-                        opacity: heartOpacity,
+                        width: 120,
+                        height: 120,
+                        tintColor: '#ff0050',
                       }}
-                    >
-                      <Image
-                        source={IMAGES.love}
-                        style={{
-                          width: 120,
-                          height: 120,
-                          tintColor: '#ff0050',
-                        }}
-                      />
-                    </Animated.View>
-                  )}
+                    />
+                  </Animated.View>
+                )}
 
-                  {/* Dynamic Avatar Positioning */}
-                  {avatarToUse && (
+                {/* Dynamic Avatar Positioning */}
+                {avatarToUse && (
+                  <View
+                    style={{
+                      position: "absolute",
+                      justifyContent: "center",
+                      alignItems: "center",
+
+                      ...(avatarPosition === "bottom-left" && { bottom: 48, left: 20 }),
+                      ...(avatarPosition === "bottom-right" && { bottom: 48, right: 20 }),
+                      ...(avatarPosition === "top-left" && { top: 20, left: 20 }),
+                      ...(avatarPosition === "top-right" && { top: 20, right: 20 }),
+                    }}
+                  >
+                    {/* OUTER GLOW */}
                     <View
                       style={{
+                        width: 150,
+                        height: 150,
+                        borderRadius: 75,
+                        // backgroundColor: "rgba(255,215,0,0.20)",
                         position: "absolute",
-                        justifyContent: "center",
-                        alignItems: "center",
-
-                        ...(avatarPosition === "bottom-left" && { bottom: 48, left: 20 }),
-                        ...(avatarPosition === "bottom-right" && { bottom: 48, right: 20 }),
-                        ...(avatarPosition === "top-left" && { top: 20, left: 20 }),
-                        ...(avatarPosition === "top-right" && { top: 20, right: 20 }),
+                        // shadowColor: "#FFD700",
+                        // shadowOffset: { width: 0, height: 0 },
+                        // shadowOpacity: 0.4,
+                        // shadowRadius: 14,
+                        // elevation: 12,
                       }}
-                    >
-                      {/* OUTER GLOW */}
+                    />
+
+                    {/* GOLD FRAME PNG (LOCAL ASSET) */}
+                    <Image
+                      source={getGoldFrame(postIndex)}
+                      style={{
+                        width: 135,
+                        height: 135,
+                        resizeMode: "contain",
+                        position: "absolute",
+                      }}
+                    />
+
+                    {/* INNER SHINE */}
+                    <View
+                      style={{
+                        width: 118,
+                        height: 118,
+                        borderRadius: 59,
+                        // borderWidth: 3,
+                        // borderColor: "rgba(255,255,255,0.9)",
+                        position: "absolute",
+                      }}
+                    />
+
+                    {/* USER AVATAR */}
+                    <ExpoImage
+                      source={{ uri: avatarToUse }}
+                      style={{
+                        width: 90,
+                        height: 90,
+                        borderRadius: 55,
+                      }}
+                      cachePolicy="disk"
+                      recyclingKey={`avatar_${id}`}
+                      transition={0}
+                    />
+                  </View>
+                )}
+
+
+
+              </TouchableOpacity>
+            ) : (
+              /* Swiper for multi-image posts */
+              <Swiper
+                height={'auto'}
+                showsButtons={false}
+                loop={false}
+                paginationStyle={{ bottom: 10 }}
+                dotStyle={{ width: 5, height: 5, backgroundColor: 'rgba(255, 255, 255, 0.40)' }}
+                activeDotStyle={{ width: 6, height: 6, backgroundColor: '#fff' }}
+                removeClippedSubviews={true}
+              >
+                {postimage.map((data: any, index: any) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={{ width: '100%', height: '100%', position: 'relative' }}
+                    activeOpacity={1}
+                    onPress={handleImageTap}
+                  >
+                    <ExpoImage
+                      style={{ width: '100%', height: '100%' }}
+                      source={{ uri: data.image }}
+                      contentFit="contain"
+                      cachePolicy="disk"
+                      recyclingKey={`${id}_${index}`}
+                      transition={0}
+                      priority="normal"
+                    />
+
+                    {/* Double-tap Like Heart Animation */}
+                    {showHeart && (
+                      <Animated.View
+                        style={{
+                          position: 'absolute',
+                          alignSelf: 'center',
+                          top: '40%',
+                          transform: [{ scale: heartScale }],
+                          opacity: heartOpacity,
+                        }}
+                      >
+                        <Image
+                          source={IMAGES.love}
+                          style={{
+                            width: 120,
+                            height: 120,
+                            tintColor: '#ff0050',
+                          }}
+                        />
+                      </Animated.View>
+                    )}
+
+                    {/* Dynamic Avatar Positioning */}
+                    {avatarToUse && (
                       <View
                         style={{
-                          width: 150,
-                          height: 150,
-                          borderRadius: 75,
-                          // backgroundColor: "rgba(255,215,0,0.20)",
                           position: "absolute",
-                          // shadowColor: "#FFD700",
-                          // shadowOffset: { width: 0, height: 0 },
-                          // shadowOpacity: 0.4,
-                          // shadowRadius: 14,
-                          // elevation: 12,
+                          justifyContent: "center",
+                          alignItems: "center",
+                          ...(avatarPosition === "bottom-left" && { bottom: 48, left: 20 }),
+                          ...(avatarPosition === "bottom-right" && { bottom: 48, right: 20 }),
+                          ...(avatarPosition === "top-left" && { top: 20, left: 20 }),
+                          ...(avatarPosition === "top-right" && { top: 20, right: 20 }),
                         }}
-                      />
-
-                      {/* GOLD FRAME PNG (LOCAL ASSET) */}
-                      <Image
-                        source={getGoldFrame(postIndex)}
-                        style={{
-                          width: 135,
-                          height: 135,
-                          resizeMode: "contain",
-                          position: "absolute",
-                        }}
-                      />
-
-                      {/* INNER SHINE */}
-                      <View
-                        style={{
-                          width: 118,
-                          height: 118,
-                          borderRadius: 59,
-                          // borderWidth: 3,
-                          // borderColor: "rgba(255,255,255,0.9)",
-                          position: "absolute",
-                        }}
-                      />
-
-                      {/* USER AVATAR */}
-                      <Image
-                        source={{ uri: avatarToUse }}
-                        style={{
-                          width: 90,
-                          height: 90,
-                          borderRadius: 55,
-                          // backgroundColor: "#fff",
-                        }}
-                      />
-                    </View>
-                  )}
-
-
-
-                </TouchableOpacity>
-              ))}
-            </Swiper>
+                      >
+                        <View
+                          style={{
+                            width: 150,
+                            height: 150,
+                            borderRadius: 75,
+                            position: "absolute",
+                          }}
+                        />
+                        <Image
+                          source={getGoldFrame(postIndex)}
+                          style={{
+                            width: 135,
+                            height: 135,
+                            resizeMode: "contain",
+                            position: "absolute",
+                          }}
+                        />
+                        <View
+                          style={{
+                            width: 118,
+                            height: 118,
+                            borderRadius: 59,
+                            position: "absolute",
+                          }}
+                        />
+                        <ExpoImage
+                          source={{ uri: avatarToUse }}
+                          style={{
+                            width: 90,
+                            height: 90,
+                            borderRadius: 55,
+                          }}
+                          cachePolicy="disk"
+                          recyclingKey={`avatar_swiper_${id}`}
+                          transition={0}
+                        />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </Swiper>
+            )}
           </View>
         )}
       </ViewShot>
@@ -1346,7 +1458,8 @@ const PostCard = ({
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      )
+      }
       <View style={{ paddingHorizontal: 15, paddingBottom: 12, paddingTop: 3, paddingRight: 5 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
           <View style={[GlobalStyleSheet.flexaling, { gap: 15 }]}>
@@ -1394,13 +1507,14 @@ const PostCard = ({
             <TouchableOpacity
               onPress={async () => {
                 try {
-                  setshow(!show);
+                  setIsSaved(!isSaved);
                   const accountType = await AsyncStorage.getItem('activeAccountType');
                   const response = await api.post('/api/user/feed/save', { feedId: id });
                   const data = response.data;
                   console.log(`${accountType} feed saved successfully:`, data.message);
                 } catch (error) {
                   console.error('Save feed error:', error);
+                  setIsSaved(isSaved); // Revert on error
                   Alert.alert('Error', 'Something went wrong while saving feed');
                 }
               }}
@@ -1411,9 +1525,9 @@ const PostCard = ({
                   height: 18,
                   resizeMode: 'contain',
                   margin: 15,
-                  tintColor: show ? colors.title : colors.primary,
+                  tintColor: isSaved ? colors.primary : colors.title,
                 }}
-                source={show ? IMAGES.save : IMAGES.save2}
+                source={isSaved ? IMAGES.save2 : IMAGES.save}
               />
             </TouchableOpacity>
           </View>
@@ -1422,7 +1536,7 @@ const PostCard = ({
       {showShareMenu && <ShareMenu />}
       {showPopup && <Popup />}
       <SubscriptionPopup />
-    </View>
+    </View >
   );
 };
 
@@ -1436,7 +1550,6 @@ export default React.memo(PostCard, (prevProps, nextProps) => {
     prevProps.dislikeCount === nextProps.dislikeCount &&
     prevProps.isSaved === nextProps.isSaved &&
     prevProps.commentsCount === nextProps.commentsCount &&
-    prevProps.visibleBoxes === nextProps.visibleBoxes &&
     prevProps.postimage?.[0]?.image === nextProps.postimage?.[0]?.image &&
     prevProps.avatarToUse === nextProps.avatarToUse
   );

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, memo } from 'react';
 import {
   SafeAreaView,
   ActivityIndicator,
@@ -16,6 +16,9 @@ import api from '../../../apiInterpretor/apiInterceptor';
 
 const { height: windowHeight } = Dimensions.get('window');
 
+// Memoized version of Reelsitem for better performance
+const MemoReelsitem = memo(Reelsitem);
+
 const Reels = ({ themeColor, textColor, route }: any) => {
   const navigation = useNavigation();
   const isFocused = useIsFocused();
@@ -25,6 +28,7 @@ const Reels = ({ themeColor, textColor, route }: any) => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const currentIndexRef = useRef(0); // Ref for stable access in memoized components
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
@@ -141,19 +145,23 @@ const Reels = ({ themeColor, textColor, route }: any) => {
         if (videoIndex !== -1) {
           hasScrolledToInitial.current = true;
           setCurrentIndex(videoIndex);
+          currentIndexRef.current = videoIndex; // CRITICAL: Sync ref for autoplay!
 
-          setTimeout(() => {
+          // Reduced delay for faster initial display - use requestAnimationFrame
+          requestAnimationFrame(() => {
             flatListRef.current?.scrollToIndex({
               index: videoIndex,
               animated: false,
             });
-          }, 300);
+          });
         } else {
           // If video not found by ID, start from beginning
           setCurrentIndex(0);
+          currentIndexRef.current = 0;
         }
       } else {
         setCurrentIndex(0);
+        currentIndexRef.current = 0;
       }
     } else {
       // Fetch reels normally if no data passed
@@ -184,6 +192,7 @@ const Reels = ({ themeColor, textColor, route }: any) => {
     if (viewableItems && viewableItems.length > 0) {
       const newIndex = viewableItems[0].index;
       setCurrentIndex(newIndex);
+      currentIndexRef.current = newIndex; // Update ref for memoized components
 
       // Load more when approaching the end (5 items before the end)
       // This ensures smoother loading without waiting until the very end
@@ -199,12 +208,16 @@ const Reels = ({ themeColor, textColor, route }: any) => {
     minimumViewTime: 200, // Reduced from 300 for faster response
   }).current;
 
-  // Render item with memoization
+  // Key extractor - stable and memoized
+  const keyExtractor = useCallback((item: any, index: number) =>
+    `reel-${item.feedId || item._id || 'unknown'}-${index}`, []);
+
+  // Render item - NO currentIndex dependency to prevent all re-renders!
   const renderItem = useCallback(({ item, index }: any) => (
     <View style={{ height: windowHeight }}>
-      <Reelsitem
-        key={item.feedId || item._id || index}
+      <MemoReelsitem
         id={item.feedId || item._id}
+        index={index}
         like={item.likesCount || 0}
         comment={item.commentsCount || 0}
         save={item.downloadsCount || 0}
@@ -216,7 +229,7 @@ const Reels = ({ themeColor, textColor, route }: any) => {
         sheetRef={sheetRef}
         reelsvideo={{ uri: item.contentUrl }}
         hasStory={false}
-        autoplay={currentIndex === index}
+        currentIndexRef={currentIndexRef}
         isLiked={item.isLiked || false}
         themeColor={themeColor}
         textColor={textColor}
@@ -224,7 +237,7 @@ const Reels = ({ themeColor, textColor, route }: any) => {
         roleRef={item.roleRef || item.role}
       />
     </View>
-  ), [currentIndex, themeColor, textColor]);
+  ), [themeColor, textColor]); // Remove currentIndex from dependencies!
 
   // Loading footer
   const renderFooter = () => {
@@ -260,7 +273,7 @@ const Reels = ({ themeColor, textColor, route }: any) => {
       <FlatList
         ref={flatListRef}
         data={reelsData}
-        keyExtractor={(item, index) => `reel-${item.feedId || item._id || 'unknown'}-${index}`}
+        keyExtractor={keyExtractor}
         renderItem={renderItem}
         pagingEnabled
         showsVerticalScrollIndicator={false}
@@ -270,12 +283,12 @@ const Reels = ({ themeColor, textColor, route }: any) => {
         onViewableItemsChanged={handleViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
 
-        // Performance optimizations
-        initialNumToRender={3} // Render 3 reels initially
-        maxToRenderPerBatch={5} // Increased from 3 for smoother scrolling
-        windowSize={7} // Increased from 5 to keep more items in memory
+        // Performance optimizations - Instagram-like
+        initialNumToRender={2}
+        maxToRenderPerBatch={3}
+        windowSize={5}
         removeClippedSubviews={true}
-        updateCellsBatchingPeriod={50} // Faster updates
+        updateCellsBatchingPeriod={100}
 
         // Footer for loading more
         ListFooterComponent={renderFooter}

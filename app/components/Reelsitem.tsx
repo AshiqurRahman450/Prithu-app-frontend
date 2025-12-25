@@ -423,8 +423,10 @@ import FloatingEmoji from './FloatingEmoji';
 
 const { height: windowHeight } = Dimensions.get('window');
 
+// Memoized Reelsitem - only re-renders when props actually change
 const Reelsitem = ({
   id,
+  index,
   like,
   comment,
   save,
@@ -436,7 +438,7 @@ const Reelsitem = ({
   sheetRef,
   reelsvideo,
   hasStory,
-  autoplay,
+  currentIndexRef, // Use ref instead of autoplay prop
   isLiked: initialIsLiked,
   themeColor,
   textColor,
@@ -445,8 +447,9 @@ const Reelsitem = ({
 }: any) => {
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
-  const video = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(autoplay);
+  const video = useRef<any>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const wasPlayingRef = useRef(false); // Track previous playing state to avoid redundant calls
   const [isShowText, setIsShowText] = useState(false);
   const [isLiked, setIsLiked] = useState(initialIsLiked || false);
   const [isSaved, setIsSaved] = useState(false);
@@ -488,55 +491,35 @@ const Reelsitem = ({
     fetchAccountType();
   }, []);
 
-  // Fetch profile data
+  // Profile fetching removed - this was causing major lag!
+  // Profile data should be passed from parent or fetched once globally
+
+
+  // Interval-based autoplay checking - much more efficient than useEffect on every scroll
   useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        // Step 1: Fetch profile details
-        const profileResponse = await api.get('/api/get/profile/detail');
+    const checkAutoplay = () => {
+      if (!currentIndexRef) return;
 
-        if (profileResponse.data.profile) {
-          setProfile({
-            displayName: profileResponse.data.profile.displayName || '',
-            phoneNumber: profileResponse.data.profile.phoneNumber || '',
-          });
+      const shouldPlay = currentIndexRef.current === index && isFocused;
 
-          // Step 2: Fetch visibility settings *after* profile details
-          const visibilityResponse = await api.get('/api/profile/visibility');
-
-          if (visibilityResponse.data.success) {
-            setIsPhoneVisible(visibilityResponse.data.visibility?.phoneNumber ?? false);
-            setisNameVisible(visibilityResponse.data.visibility?.displayName ?? false);
-          } else {
-            console.log('Failed to get visibility settings:', visibilityResponse.data.message);
-          }
-        } else {
-          console.log('Error fetching profile:', profileResponse.data.message);
-        }
-      } catch (err) {
-        console.error('Fetch profile error:', err);
+      // Only call play/pause if state actually needs to change
+      if (shouldPlay && !wasPlayingRef.current) {
+        wasPlayingRef.current = true;
+        video.current?.playAsync().catch(() => { });
+        setIsPlaying(true);
+      } else if (!shouldPlay && wasPlayingRef.current) {
+        wasPlayingRef.current = false;
+        video.current?.pauseAsync().catch(() => { });
+        setIsPlaying(false);
       }
     };
 
-    fetchProfile();
-  }, []);
+    // Check every 200ms - fast enough for smooth UX, light enough for performance
+    const interval = setInterval(checkAutoplay, 200);
+    checkAutoplay(); // Initial check
 
-
-  // Play/pause based on autoplay and focus
-  useEffect(() => {
-    const playPause = async () => {
-      if (video.current) {
-        if (autoplay && isFocused) {
-          await video.current.playAsync();
-          setIsPlaying(true);
-        } else {
-          await video.current.pauseAsync();
-          setIsPlaying(false);
-        }
-      }
-    };
-    playPause();
-  }, [autoplay, isFocused]);
+    return () => clearInterval(interval);
+  }, [index, isFocused, currentIndexRef]);
 
   // Cleanup on unmount
   useEffect(() => {

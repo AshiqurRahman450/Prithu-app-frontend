@@ -31,7 +31,7 @@ const MemoPostCard = memo(PostCard, (prev, next) =>
     prev.isLiked === next.isLiked &&
     prev.isSaved === next.isSaved &&
     prev.isDisliked === next.isDisliked &&
-    prev.dislikesCount === next.dislikesCount &&
+    prev.dislikeCount === next.dislikeCount &&
     prev.commentsCount === next.commentsCount
 );
 
@@ -341,8 +341,7 @@ const ProfilePost = ({ route }: any) => {
         index,
     }), []);
 
-    // Memoized visible boxes (empty for this use case)
-    const memoVisibleBoxes = useMemo(() => [], []);
+    // REMOVED: memoVisibleBoxes - no longer needed since visibleBoxes was removed from PostCard
 
     // Optimized renderItem
     const renderItem = useCallback(({ item: post, index }: { item: Post; index: number }) => (
@@ -367,7 +366,6 @@ const ProfilePost = ({ route }: any) => {
                 reelsvideo={null}
                 caption={post.caption}
                 background={post.background}
-                visibleBoxes={memoVisibleBoxes}
                 onNotInterested={() => handleNotInterested(post._id)}
                 onHidePost={() => handleHidePost(post._id)}
                 profileUserId={post.profileUserId}
@@ -375,7 +373,7 @@ const ProfilePost = ({ route }: any) => {
                 isLiked={post.isLiked}
                 isSaved={post.isSaved}
                 isDisliked={post.isDisliked || false}
-                dislikesCount={post.dislikesCount || 0}
+                dislikeCount={post.dislikesCount || 0}
                 currentUserProfile={userProfile}
                 visibilitySettings={visibilitySettings}
                 onDislikeUpdate={(newIsDisliked: boolean, newDislikeCount: number) =>
@@ -386,7 +384,7 @@ const ProfilePost = ({ route }: any) => {
                 }
             />
         </View>
-    ), [memoVisibleBoxes, userProfile, visibilitySettings, handleNotInterested, handleHidePost, handleDislikeUpdate, handleLikeUpdate]);
+    ), [userProfile, visibilitySettings, handleNotInterested, handleHidePost, handleDislikeUpdate, handleLikeUpdate]);
 
     // Loading state
     if (loading) {
@@ -425,16 +423,18 @@ const ProfilePost = ({ route }: any) => {
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                 }
-                // Performance optimizations for smooth scrolling
+                // Performance optimizations for smooth scrolling (same as PostList)
                 removeClippedSubviews={true}
-                maxToRenderPerBatch={3}
-                updateCellsBatchingPeriod={50}
-                windowSize={5}
+                maxToRenderPerBatch={4}
+                updateCellsBatchingPeriod={100}
+                windowSize={7}
                 initialNumToRender={3}
-                // Scroll performance
-                scrollEventThrottle={16}
+                // Scroll performance - higher throttle to reduce updates
+                scrollEventThrottle={32}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 10 }}
+                // Extra optimizations for smooth scrolling
+                maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
             />
             <PostShareSheet ref={sheetRef} />
             <PostoptionSheet ref={moresheet} />
