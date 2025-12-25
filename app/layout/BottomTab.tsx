@@ -1,0 +1,283 @@
+import { useEffect, useRef, useState } from 'react';
+import { Image, Platform, TouchableOpacity, View, Dimensions, ActivityIndicator, Animated } from 'react-native';
+import { COLORS, SIZES, IMAGES } from '../constants/theme';
+import { useTheme } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  widthPercentageToDP as wp,
+} from 'react-native-responsive-screen';
+import { GlobalStyleSheet } from '../constants/styleSheet';
+import api from '../../apiInterpretor/apiInterceptor';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+
+type Props = {
+  state: any,
+  navigation: any,
+  descriptors: any,
+  postListRef: any;
+};
+
+// --------------------------- Skeleton Loader Component ----------------------------
+
+const SkeletonProfileIcon = () => {
+  const shimmer = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(shimmer, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, [shimmer]);
+
+  const shimmerOpacity = shimmer.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.3, 0.8, 0.3],
+  });
+
+  return (
+    <Animated.View
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 50,
+        borderWidth: 2,
+        borderColor: COLORS.primary,
+        backgroundColor: '#e0e0e0',
+        opacity: shimmerOpacity,
+      }}
+    />
+  );
+};
+
+// --------------------------- Component ----------------------------
+
+const BottomTab = ({ state, descriptors, navigation, postListRef }: Props) => {
+  const theme = useTheme();
+  const { colors }: { colors: any } = theme;
+
+  const [tabWidth, setWidth] = useState(wp('100%'));
+  const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [activeAccountType, setActiveAccountType] = useState<string | null>(null);
+  const [isProfileImageLoading, setIsProfileImageLoading] = useState(true);
+
+  const lastTap = useRef<number>(0);
+
+  useEffect(() => {
+    const fetchAccountType = async () => {
+      try {
+        const storedType = await AsyncStorage.getItem('activeAccountType');
+        if (storedType) {
+          setActiveAccountType(storedType);
+        }
+      } catch (error) {
+        console.log('Error fetching account type:', error);
+      }
+    };
+    fetchAccountType();
+  }, []);
+
+  const handleHomePress = () => {
+    const now = Date.now();
+    const DOUBLE_PRESS_DELAY = 300;
+
+    if (lastTap.current && now - lastTap.current < DOUBLE_PRESS_DELAY) {
+      if (postListRef.current) {
+        postListRef.current.scrollToTop();
+      }
+    } else {
+      navigation.navigate('Home');
+    }
+
+    lastTap.current = now;
+  };
+
+  const filteredRoutes = state.routes;
+
+  Dimensions.addEventListener('change', val => {
+    setWidth(val.window.width);
+  });
+
+  const fetchProfilePic = async () => {
+    try {
+      const response = await api.get("/api/get/profile/detail");
+
+      if (response.data?.profile?.profileAvatar && response.data.profile.profileAvatar !== 'Unknown') {
+        const fixedUrl = response.data.profile.profileAvatar;
+        setProfilePic(fixedUrl);
+        console.log('Profile avatar URL:', fixedUrl);
+      } else {
+        setProfilePic(null);
+        setIsProfileImageLoading(false);
+      }
+    } catch (err) {
+      console.error("Error fetching profile picture:", err);
+      setIsProfileImageLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfilePic();
+  }, []);
+
+  // Get the correct navigation target based on account type and label
+  const getNavigationTarget = (label: string, isCreator: boolean) => {
+    if (label === 'Home') return 'Home';
+    if (label === 'Search') return 'Search';
+    if (label === 'Profile') return 'Profile';
+
+    if (!isCreator) {
+      if (label === 'Reels') return 'Reels';
+      if (label === 'Chat') return 'ComingSoon'; // Navigate to Coming Soon page with confetti animation
+    } else {
+      if (label === 'Reels') return 'AddStory';
+      if (label === 'Chat') return 'Reels';
+    }
+
+    return label;
+  };
+
+  // Get icon name based on label and account type
+  const getIconName = (label: string, isCreator: boolean) => {
+    switch (label) {
+      case 'Home':
+        return 'house';
+      case 'Search':
+        return 'search';
+      case 'Reels':
+        return isCreator ? 'add' : 'video-collection';
+      case 'Chat':
+        return isCreator ? 'ondemand-video' : 'emoji-events';
+      case 'Profile':
+        return 'person';
+      default:
+        return 'circle';
+    }
+  };
+
+  return (
+    <View
+      style={[{
+        backgroundColor: colors.card,
+        shadowColor: 'rgba(0, 0, 0, 0.60)',
+        shadowOffset: {
+          width: 0,
+          height: 0,
+        },
+        shadowOpacity: .1,
+        shadowRadius: 5,
+        left: 0,
+        bottom: 0,
+        right: 0,
+      }, Platform.OS === 'ios' && {
+        backgroundColor: colors.card,
+      }]}
+    >
+      <View
+        style={[{
+          height: 60,
+          backgroundColor: theme.dark ? colors.background : colors.card,
+          paddingTop: 5
+        }, Platform.OS === 'web' && { paddingTop: 10 }]}
+      >
+        <View style={[GlobalStyleSheet.container, {
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 0,
+          paddingTop: 0,
+          paddingBottom: 0,
+        }]}>
+          {filteredRoutes.map((route: any, index: any) => {
+            const { options } = descriptors[route.key];
+            const label =
+              options.tabBarLabel !== undefined
+                ? options.tabBarLabel
+                : options.title !== undefined
+                  ? options.title
+                  : route.name;
+
+            const isFocused = state.index === index;
+            const isCreator = activeAccountType === 'Creator';
+
+            const onPress = () => {
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              });
+
+              if (event.defaultPrevented) {
+                return;
+              }
+
+              if (label === 'Home') {
+                handleHomePress();
+                return;
+              }
+
+              const target = getNavigationTarget(label, isCreator);
+              navigation.navigate(target);
+            };
+
+            const iconName = getIconName(label, isCreator);
+
+            // Set icon color: green when active, black when inactive
+            const iconColor = isFocused ? '#32CD32' : '#000000';
+
+            return (
+              <TouchableOpacity
+                key={index}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityState={isFocused ? { selected: true } : {}}
+                accessibilityLabel={options.tabBarAccessibilityLabel}
+                testID={options.tabBarTestID}
+                onPress={onPress}
+                style={{ flex: 1, alignItems: 'center', height: '100%', justifyContent: 'center', marginTop: 5 }}
+              >
+                {label === 'Profile' ? (
+                  <View style={{ position: 'relative', justifyContent: 'center', alignItems: 'center' }}>
+                    {isProfileImageLoading && (
+                      <ActivityIndicator
+                        style={{ position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -10 }, { translateY: -10 }] }}
+                        size="small"
+                        color={colors.primary}
+                      />
+                    )}
+                    <Image
+                      style={{
+                        width: 37,
+                        height: 37,
+                        borderRadius: 50,
+                        borderWidth: 2,
+                        borderColor: isFocused ? '#32CD32' : COLORS.primary, // Green border when active
+                        opacity: isProfileImageLoading ? 0.2 : 1,
+                      }}
+                      source={{ uri: profilePic }}
+                      onLoadStart={() => setIsProfileImageLoading(true)}
+                      onLoadEnd={() => setIsProfileImageLoading(false)}
+                      onError={(error) => {
+                        console.log('Profile image load error:', error.nativeEvent);
+                        setIsProfileImageLoading(false);
+                      }}
+                    />
+                  </View>
+                ) : (
+                  <Icon
+                    name={iconName}
+                    size={32}
+                    color={iconColor} // Green when active, black when inactive
+                  />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  );
+};
+
+export default BottomTab;
